@@ -1,6 +1,7 @@
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { toCsv, csvResponse } from "@/lib/csv";
+import { flushClicks } from "@/lib/clicks-flush";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +19,9 @@ export async function GET(request: Request) {
   const isOwner = link.ownerId === session.user.id;
   const isAdmin = session.user.role === "ADMIN";
   if (!isOwner && !isAdmin) return new Response("Forbidden", { status: 403 });
+
+  // An export should be complete, so persist anything still buffered first.
+  await flushClicks(20);
 
   const clicks = await prisma.click.findMany({
     where: { linkId: id },

@@ -1,5 +1,8 @@
+import { after } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { getPendingCounts } from "@/lib/link-cache";
+import { flushClicks } from "@/lib/clicks-flush";
 import { getBaseUrl } from "@/lib/base-url";
 import { Header } from "@/components/Header";
 import { LoginScreen } from "@/components/LoginScreen";
@@ -29,6 +32,14 @@ export default async function HomePage({
     include: { _count: { select: { clicks: true } } },
   });
 
+  // Clicks sitting in the Redis buffer haven't reached Postgres yet, so add
+  // them in — otherwise the totals would lag behind reality by up to a day.
+  const pending = await getPendingCounts(links.map((l) => l.id));
+
+  // This request already woke the database, which makes draining the queue
+  // essentially free. Runs once the response has been sent.
+  after(() => flushClicks(6));
+
   const cards: LinkCardData[] = links.map((l) => ({
     id: l.id,
     slug: l.slug,
@@ -37,7 +48,7 @@ export default async function HomePage({
     createdAt: l.createdAt.toISOString(),
     expiresAt: l.expiresAt ? l.expiresAt.toISOString() : null,
     disabled: l.disabled,
-    clicks: l._count.clicks,
+    clicks: l._count.clicks + (pending[l.id] ?? 0),
   }));
 
   return (

@@ -5,6 +5,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { buildDestinationUrl, type CustomParam } from "@/lib/url";
 import { randomSlug, validateCustomSlug, RESERVED_SLUGS } from "@/lib/slug";
+import { invalidateLink } from "@/lib/link-cache";
 
 export type CreateLinkState = {
   ok: boolean;
@@ -99,6 +100,8 @@ export async function createLink(
     return { ok: false, error: "שמירת הלינק נכשלה, נסו שוב" };
   }
 
+  // A request for this slug may have been negative-cached before it existed.
+  await invalidateLink(slug);
   revalidatePath("/");
   return { ok: true, slug };
 }
@@ -118,6 +121,7 @@ export async function deleteLink(formData: FormData): Promise<void> {
   if (!isOwner && !isAdmin) return;
 
   await prisma.link.delete({ where: { id } });
+  await invalidateLink(link.slug);
   revalidatePath("/");
 }
 
@@ -140,6 +144,7 @@ export async function toggleLinkActive(formData: FormData): Promise<void> {
     where: { id },
     data: { disabled: !link.disabled },
   });
+  await invalidateLink(link.slug);
   revalidatePath("/");
   revalidatePath(`/link/${id}`);
 }
@@ -185,6 +190,9 @@ export async function updateLink(
     where: { id },
     data: { title, url: destination, slug: newSlug, expiresAt: parseExpiry(formData) },
   });
+
+  // Both slugs: the old one must stop resolving, the new one may be stale.
+  await invalidateLink(link.slug, newSlug);
 
   revalidatePath("/");
   revalidatePath(`/link/${id}`);

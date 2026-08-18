@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { flushClicks } from "@/lib/clicks-flush";
 import { getBaseUrl } from "@/lib/base-url";
 import { Header } from "@/components/Header";
 import { LoginScreen } from "@/components/LoginScreen";
@@ -153,6 +154,11 @@ export default async function LinkStatsPage({
 
   const { id } = await params;
   const { range: rangeParam } = await searchParams;
+
+  // Write out buffered clicks before reading, so the totals and breakdowns
+  // below include everything. This page wakes the database regardless, so the
+  // flush adds no compute time that wasn't already being spent.
+  await flushClicks(6);
 
   const link = await prisma.link.findUnique({
     where: { id },

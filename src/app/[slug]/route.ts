@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma";
 import { refererSource } from "@/lib/url";
 import { isBot } from "@/lib/bots";
+import { isPossibleSlug } from "@/lib/slug";
 import {
   cacheLink,
   getCachedLink,
@@ -24,6 +25,31 @@ function safeDecode(value: string | null): string | null {
   }
 }
 
+/**
+ * Postgres is unreachable and this slug wasn't cached, so the destination is
+ * genuinely unknown. Answer honestly with a retryable error rather than a
+ * misleading "not found" — and crucially, never cache this outcome: a database
+ * failure is not evidence that the link is missing, and caching it would
+ * blackhole a real link for the lifetime of the entry.
+ */
+function unavailable(): Response {
+  return new Response(
+    '<!doctype html><html lang="he" dir="rtl"><meta charset="utf-8">' +
+      '<title>רגע, לא זמין</title>' +
+      '<div style="font-family:system-ui,sans-serif;text-align:center;padding:15vh 1.5rem">' +
+      '<h1 style="font-size:1.5rem;margin:0 0 .5rem">הלינק לא זמין כרגע</h1>' +
+      '<p style="color:#666;margin:0">נסו שוב בעוד רגע.</p></div>',
+    {
+      status: 503,
+      headers: {
+        "content-type": "text/html; charset=utf-8",
+        "retry-after": "60",
+        "cache-control": "no-store",
+      },
+    },
+  );
+}
+
 function bounce(request: Request, reason: string, slug: string): Response {
   const origin = new URL(request.url).origin;
   return Response.redirect(
@@ -38,6 +64,12 @@ export async function GET(
 ) {
   const { slug } = await params;
 
+  // Asset-looking paths (favicon.ico, meta.json) can never be slugs, so reject
+  // them before spending a Redis or database call.
+  if (!isPossibleSlug(slug)) {
+    return new Response("Not found", { status: 404 });
+  }
+
   // Fast path: Redis. Falls through to Postgres only on a cold cache, which
   // explicit invalidation on every mutation keeps rare.
   let link: CachedLink | null = null;
@@ -49,10 +81,17 @@ export async function GET(
     // Known-bad slug. Don't wake the database for it.
     return bounce(request, "notfound", slug);
   } else {
-    const row = await prisma.link.findUnique({
-      where: { slug },
-      select: { id: true, url: true, disabled: true, expiresAt: true },
-    });
+    let row;
+    try {
+      row = await prisma.link.findUnique({
+        where: { slug },
+        select: { id: true, url: true, disabled: true, expiresAt: true },
+      });
+    } catch {
+      // Database down or over quota. Redis still serves every cached link, so
+      // this only affects slugs that happen to be cold.
+      return unavailable();
+    }
     link = row
       ? {
           id: row.id,

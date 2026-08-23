@@ -24,6 +24,15 @@ export function randomSlug(): string {
 
 const SLUG_RE = /^[a-zA-Z0-9_-]+$/;
 
+/**
+ * Cheap pre-check for the redirect route: could this path be a slug at all?
+ * Lets obvious non-slugs (favicon.ico, meta.json) be rejected without spending
+ * a Redis round-trip or a database query on them.
+ */
+export function isPossibleSlug(value: string): boolean {
+  return value.length > 0 && value.length <= 50 && SLUG_RE.test(value);
+}
+
 export function validateCustomSlug(slug: string): string | null {
   const value = slug.trim();
   if (!value) return "כתובת מותאמת ריקה";

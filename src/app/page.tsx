@@ -2,6 +2,7 @@ import { after } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { getPendingCounts } from "@/lib/link-cache";
+import { accessFromRow, capabilitiesFor } from "@/lib/link-access";
 import { flushClicks } from "@/lib/clicks-flush";
 import { getBaseUrl } from "@/lib/base-url";
 import { Header } from "@/components/Header";
@@ -26,10 +27,34 @@ export default async function HomePage({
 
   const baseUrl = await getBaseUrl();
 
+  // Links the viewer owns, plus any a colleague has shared with them.
   const links = await prisma.link.findMany({
-    where: { ownerId: session.user.id },
+    where: {
+      OR: [
+        { ownerId: session.user.id },
+        { shares: { some: { userId: session.user.id } } },
+      ],
+    },
     orderBy: { createdAt: "desc" },
-    include: { _count: { select: { clicks: true } } },
+    include: {
+      _count: { select: { clicks: true } },
+      owner: { select: { name: true, email: true } },
+      shares: {
+        select: {
+          userId: true,
+          role: true,
+          user: { select: { id: true, name: true, email: true } },
+        },
+      },
+    },
+  });
+
+  // Everyone who could be shared with. Small, single-domain organisation, so a
+  // picker beats typing an address and getting it wrong.
+  const people = await prisma.user.findMany({
+    where: { id: { not: session.user.id } },
+    select: { id: true, name: true, email: true },
+    orderBy: { name: "asc" },
   });
 
   // Clicks sitting in the Redis buffer haven't reached Postgres yet, so add
@@ -40,16 +65,36 @@ export default async function HomePage({
   // essentially free. Runs once the response has been sent.
   after(() => flushClicks(6));
 
-  const cards: LinkCardData[] = links.map((l) => ({
-    id: l.id,
-    slug: l.slug,
-    title: l.title,
-    url: l.url,
-    createdAt: l.createdAt.toISOString(),
-    expiresAt: l.expiresAt ? l.expiresAt.toISOString() : null,
-    disabled: l.disabled,
-    clicks: l._count.clicks + (pending[l.id] ?? 0),
-  }));
+  const cards: LinkCardData[] = links.map((l) => {
+    const perms = capabilitiesFor(
+      accessFromRow(l, session.user.id!, session.user.role),
+    );
+    return {
+      id: l.id,
+      slug: l.slug,
+      title: l.title,
+      url: l.url,
+      createdAt: l.createdAt.toISOString(),
+      expiresAt: l.expiresAt ? l.expiresAt.toISOString() : null,
+      disabled: l.disabled,
+      clicks: l._count.clicks + (pending[l.id] ?? 0),
+      // Only label the owner on links that aren't the viewer's own.
+      ownerName:
+        l.ownerId === session.user.id
+          ? null
+          : (l.owner.name ?? l.owner.email),
+      perms,
+      // Don't reveal the full access list to someone who can't change it.
+      shares: perms.canShare
+        ? l.shares.map((sh) => ({
+            id: sh.user.id,
+            name: sh.user.name,
+            email: sh.user.email,
+            role: sh.role,
+          }))
+        : undefined,
+    };
+  });
 
   return (
     <>
@@ -82,7 +127,7 @@ export default async function HomePage({
 
         <CreateLinkForm baseUrl={baseUrl} />
 
-        <LinksBrowser cards={cards} baseUrl={baseUrl} />
+        <LinksBrowser cards={cards} baseUrl={baseUrl} people={people} />
       </main>
     </>
   );

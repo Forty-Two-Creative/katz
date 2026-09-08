@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { flushClicks } from "@/lib/clicks-flush";
+import { accessFor, capabilitiesFor } from "@/lib/link-access";
 import { getBaseUrl } from "@/lib/base-url";
 import { Header } from "@/components/Header";
 import { LoginScreen } from "@/components/LoginScreen";
@@ -167,9 +168,11 @@ export default async function LinkStatsPage({
 
   if (!link) notFound();
 
-  const isOwner = link.ownerId === session.user.id;
-  const isAdmin = session.user.role === "ADMIN";
-  if (!isOwner && !isAdmin) notFound();
+  const access = await accessFor(link, session.user.id, session.user.role);
+  const can = capabilitiesFor(access);
+  if (!can.canView) notFound();
+
+  const isOwner = access === "owner" && link.ownerId === session.user.id;
 
   const baseUrl = await getBaseUrl();
   const shortUrl = `${baseUrl}/${link.slug}`;
@@ -253,12 +256,14 @@ export default async function LinkStatsPage({
             >
               ⬇ ייצוא כניסות
             </a>
-            <Link
-              href={`/link/${id}/edit`}
-              className="text-sm font-medium text-gray-500 hover:text-gray-800"
-            >
-              עריכת הלינק
-            </Link>
+            {can.canEdit && (
+              <Link
+                href={`/link/${id}/edit`}
+                className="text-sm font-medium text-gray-500 hover:text-gray-800"
+              >
+                עריכת הלינק
+              </Link>
+            )}
           </div>
         </div>
 
@@ -306,9 +311,11 @@ export default async function LinkStatsPage({
               )}
             </p>
           )}
-          {isAdmin && !isOwner && (
+          {!isOwner && (
             <p className="mt-2 text-xs text-gray-400">
               נוצר על ידי {link.owner.name ?? link.owner.email}
+              {access === "view" && " · שותף איתך לצפייה"}
+              {access === "edit" && " · שותף איתך לעריכה"}
             </p>
           )}
         </div>

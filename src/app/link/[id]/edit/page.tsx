@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
+import { accessFor, capabilitiesFor } from "@/lib/link-access";
 import { getBaseUrl } from "@/lib/base-url";
 import { Header } from "@/components/Header";
 import { LoginScreen } from "@/components/LoginScreen";
@@ -21,9 +22,10 @@ export default async function EditLinkPage({
   const link = await prisma.link.findUnique({ where: { id } });
   if (!link) notFound();
 
-  const isOwner = link.ownerId === session.user.id;
-  const isAdmin = session.user.role === "ADMIN";
-  if (!isOwner && !isAdmin) notFound();
+  const can = capabilitiesFor(
+    await accessFor(link, session.user.id, session.user.role),
+  );
+  if (!can.canEdit) notFound();
 
   const baseUrl = await getBaseUrl();
 

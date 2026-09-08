@@ -11,7 +11,12 @@ export async function GET() {
 
   const baseUrl = await getBaseUrl();
   const links = await prisma.link.findMany({
-    where: { ownerId: session.user.id },
+    where: {
+      OR: [
+        { ownerId: session.user.id },
+        { shares: { some: { userId: session.user.id } } },
+      ],
+    },
     orderBy: { createdAt: "desc" },
     include: { _count: { select: { clicks: true } } },
   });

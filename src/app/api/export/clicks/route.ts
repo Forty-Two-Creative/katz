@@ -2,6 +2,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { toCsv, csvResponse } from "@/lib/csv";
 import { flushClicks } from "@/lib/clicks-flush";
+import { accessFor, capabilitiesFor } from "@/lib/link-access";
 
 export const dynamic = "force-dynamic";
 
@@ -16,9 +17,10 @@ export async function GET(request: Request) {
   const link = await prisma.link.findUnique({ where: { id } });
   if (!link) return new Response("Not found", { status: 404 });
 
-  const isOwner = link.ownerId === session.user.id;
-  const isAdmin = session.user.role === "ADMIN";
-  if (!isOwner && !isAdmin) return new Response("Forbidden", { status: 403 });
+  const can = capabilitiesFor(
+    await accessFor(link, session.user.id, session.user.role),
+  );
+  if (!can.canView) return new Response("Forbidden", { status: 403 });
 
   // An export should be complete, so persist anything still buffered first.
   await flushClicks(20);

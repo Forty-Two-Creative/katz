@@ -6,6 +6,7 @@ import { prisma } from "@/lib/prisma";
 import { buildDestinationUrl, type CustomParam } from "@/lib/url";
 import { randomSlug, validateCustomSlug, RESERVED_SLUGS } from "@/lib/slug";
 import { invalidateLink } from "@/lib/link-cache";
+import { accessFor, capabilitiesFor } from "@/lib/link-access";
 
 export type CreateLinkState = {
   ok: boolean;
@@ -116,9 +117,10 @@ export async function deleteLink(formData: FormData): Promise<void> {
   const link = await prisma.link.findUnique({ where: { id } });
   if (!link) return;
 
-  const isOwner = link.ownerId === session.user.id;
-  const isAdmin = session.user.role === "ADMIN";
-  if (!isOwner && !isAdmin) return;
+  const can = capabilitiesFor(
+    await accessFor(link, session.user.id, session.user.role),
+  );
+  if (!can.canDelete) return;
 
   await prisma.link.delete({ where: { id } });
   await invalidateLink(link.slug);
@@ -136,9 +138,10 @@ export async function toggleLinkActive(formData: FormData): Promise<void> {
   const link = await prisma.link.findUnique({ where: { id } });
   if (!link) return;
 
-  const isOwner = link.ownerId === session.user.id;
-  const isAdmin = session.user.role === "ADMIN";
-  if (!isOwner && !isAdmin) return;
+  const can = capabilitiesFor(
+    await accessFor(link, session.user.id, session.user.role),
+  );
+  if (!can.canDisable) return;
 
   await prisma.link.update({
     where: { id },
@@ -162,9 +165,10 @@ export async function updateLink(
   const link = await prisma.link.findUnique({ where: { id } });
   if (!link) return { ok: false, error: "הלינק לא נמצא" };
 
-  const isOwner = link.ownerId === session.user.id;
-  const isAdmin = session.user.role === "ADMIN";
-  if (!isOwner && !isAdmin) return { ok: false, error: "אין הרשאה" };
+  const can = capabilitiesFor(
+    await accessFor(link, session.user.id, session.user.role),
+  );
+  if (!can.canEdit) return { ok: false, error: "אין הרשאה" };
 
   const title = String(formData.get("title") ?? "").trim() || null;
   const rawUrl = String(formData.get("url") ?? "");
@@ -197,6 +201,77 @@ export async function updateLink(
   revalidatePath("/");
   revalidatePath(`/link/${id}`);
   return { ok: true };
+}
+
+// ===== Per-link sharing =====
+
+/** Loads the link and checks the caller may change who it is shared with. */
+async function guardShare(linkId: string) {
+  const session = await auth();
+  if (!session?.user?.id) return null;
+  const link = await prisma.link.findUnique({ where: { id: linkId } });
+  if (!link) return null;
+  const can = capabilitiesFor(
+    await accessFor(link, session.user.id, session.user.role),
+  );
+  if (!can.canShare) return null;
+  return { session, link };
+}
+
+export type ShareState = { ok: boolean; error?: string };
+
+/** Grants a colleague access to a link, or changes the level they already have. */
+export async function shareLink(
+  _prev: ShareState,
+  formData: FormData,
+): Promise<ShareState> {
+  const linkId = String(formData.get("linkId") ?? "");
+  const userId = String(formData.get("userId") ?? "");
+  const role = String(formData.get("role") ?? "VIEWER");
+
+  if (!userId) return { ok: false, error: "בחרו עם מי לשתף" };
+  if (role !== "VIEWER" && role !== "EDITOR") {
+    return { ok: false, error: "הרשאה לא מוכרת" };
+  }
+
+  const guard = await guardShare(linkId);
+  if (!guard) return { ok: false, error: "אין הרשאה לשתף את הלינק הזה" };
+
+  // Sharing with the owner would be a no-op that then shows up as a
+  // revocable row, which is confusing.
+  if (userId === guard.link.ownerId) {
+    return { ok: false, error: "הלינק כבר שייך למשתמש הזה" };
+  }
+
+  const target = await prisma.user.findUnique({ where: { id: userId } });
+  if (!target) return { ok: false, error: "המשתמש לא נמצא" };
+
+  await prisma.linkShare.upsert({
+    where: { linkId_userId: { linkId, userId } },
+    create: { linkId, userId, role, sharedById: guard.session.user.id },
+    update: { role },
+  });
+
+  revalidatePath("/");
+  revalidatePath(`/link/${linkId}`);
+  return { ok: true };
+}
+
+/** Revokes a colleague's access. */
+export async function unshareLink(formData: FormData): Promise<void> {
+  const linkId = String(formData.get("linkId") ?? "");
+  const userId = String(formData.get("userId") ?? "");
+  if (!linkId || !userId) return;
+
+  const guard = await guardShare(linkId);
+  if (!guard) return;
+
+  await prisma.linkShare
+    .delete({ where: { linkId_userId: { linkId, userId } } })
+    .catch(() => {});
+
+  revalidatePath("/");
+  revalidatePath(`/link/${linkId}`);
 }
 
 // ===== Admin: user management =====

@@ -1,9 +1,16 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { deleteLink, toggleLinkActive } from "@/lib/actions";
 import { CopyButton, ShareButton } from "@/components/ShortLinkActions";
 import { QrButton } from "@/components/QrButton";
+import {
+  SharePanel,
+  type ShareEntry,
+  type SharePerson,
+} from "@/components/SharePanel";
+import { type LinkCapabilities } from "@/lib/link-roles";
 
 export type LinkCardData = {
   id: string;
@@ -15,15 +22,23 @@ export type LinkCardData = {
   disabled: boolean;
   clicks: number;
   ownerName?: string | null;
+  /** Resolved on the server so the client never needs the access rules. */
+  perms: LinkCapabilities;
+  /** Who this link is already shared with. Only sent when the viewer may share. */
+  shares?: ShareEntry[];
 };
 
 export function LinkCard({
   link,
   baseUrl,
+  people = [],
 }: {
   link: LinkCardData;
   baseUrl: string;
+  /** Colleagues who could be added, passed down once for the whole list. */
+  people?: SharePerson[];
 }) {
+  const [shareOpen, setShareOpen] = useState(false);
   const shortUrl = `${baseUrl}/${link.slug}`;
   const expiresAt = link.expiresAt ? new Date(link.expiresAt) : null;
   const isExpired = expiresAt ? expiresAt.getTime() < Date.now() : false;
@@ -69,7 +84,27 @@ export function LinkCard({
 
         <div className="flex shrink-0 items-center gap-2">
           <CopyButton value={shortUrl} />
-          <ShareButton url={shortUrl} title={link.title ?? undefined} />
+          {link.perms.canShare ? (
+            <button
+              type="button"
+              onClick={() => setShareOpen((v) => !v)}
+              aria-expanded={shareOpen}
+              className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-sm font-medium ring-1 transition ${
+                shareOpen
+                  ? "bg-brand-50 text-brand-700 ring-brand-200"
+                  : "bg-white text-gray-600 ring-gray-200 hover:bg-gray-50"
+              }`}
+            >
+              שיתוף
+              {(link.shares?.length ?? 0) > 0 && (
+                <span className="rounded bg-brand-100 px-1 text-xs font-bold text-brand-700">
+                  {link.shares!.length}
+                </span>
+              )}
+            </button>
+          ) : (
+            <ShareButton url={shortUrl} title={link.title ?? undefined} />
+          )}
           <QrButton url={shortUrl} slug={link.slug} />
         </div>
       </div>
@@ -84,6 +119,16 @@ export function LinkCard({
           </span>
           {link.ownerName && (
             <span className="text-gray-400">· {link.ownerName}</span>
+          )}
+          {link.perms.access === "view" && (
+            <span className="rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-700">
+              שותף איתך · צפייה
+            </span>
+          )}
+          {link.perms.access === "edit" && (
+            <span className="rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-700">
+              שותף איתך · עריכה
+            </span>
           )}
           {link.disabled && (
             <span className="rounded bg-gray-200 px-1.5 py-0.5 text-xs font-semibold text-gray-600">
@@ -109,12 +154,15 @@ export function LinkCard({
           >
             סטטיסטיקות
           </Link>
-          <Link
-            href={`/link/${link.id}/edit`}
-            className="font-medium text-gray-500 hover:text-gray-800"
-          >
-            ערוך
-          </Link>
+          {link.perms.canEdit && (
+            <Link
+              href={`/link/${link.id}/edit`}
+              className="font-medium text-gray-500 hover:text-gray-800"
+            >
+              ערוך
+            </Link>
+          )}
+          {link.perms.canDisable && (
           <form action={toggleLinkActive}>
             <input type="hidden" name="id" value={link.id} />
             <button
@@ -128,6 +176,8 @@ export function LinkCard({
               {link.disabled ? "הפעל" : "השבת"}
             </button>
           </form>
+          )}
+          {link.perms.canDelete && (
           <form
             action={deleteLink}
             onSubmit={(e) => {
@@ -144,8 +194,19 @@ export function LinkCard({
               מחק
             </button>
           </form>
+          )}
         </div>
       </div>
+
+      {shareOpen && link.perms.canShare && (
+        <SharePanel
+          linkId={link.id}
+          shortUrl={shortUrl}
+          title={link.title ?? undefined}
+          shares={link.shares ?? []}
+          people={people}
+        />
+      )}
     </div>
   );
 }

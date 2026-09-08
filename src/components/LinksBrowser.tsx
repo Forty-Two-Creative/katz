@@ -2,13 +2,16 @@
 
 import { useMemo, useState } from "react";
 import { LinkCard, type LinkCardData } from "@/components/LinkCard";
+import { type SharePerson } from "@/components/SharePanel";
 
 export function LinksBrowser({
   cards,
   baseUrl,
+  people = [],
 }: {
   cards: LinkCardData[];
   baseUrl: string;
+  people?: SharePerson[];
 }) {
   const [query, setQuery] = useState("");
 
@@ -59,7 +62,12 @@ export function LinksBrowser({
       ) : (
         <div className="space-y-3">
           {filtered.map((link) => (
-            <LinkCard key={link.id} link={link} baseUrl={baseUrl} />
+            <LinkCard
+              key={link.id}
+              link={link}
+              baseUrl={baseUrl}
+              people={people}
+            />
           ))}
         </div>
       )}

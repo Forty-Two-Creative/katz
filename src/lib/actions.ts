@@ -4,9 +4,11 @@ import { revalidatePath } from "next/cache";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { buildDestinationUrl, type CustomParam } from "@/lib/url";
-import { randomSlug, validateCustomSlug, RESERVED_SLUGS } from "@/lib/slug";
+import { validateCustomSlug } from "@/lib/slug";
 import { invalidateLink } from "@/lib/link-cache";
 import { accessFor, capabilitiesFor } from "@/lib/link-access";
+import { createLinkRecord } from "@/lib/create-link";
+import { normalizeClientId } from "@/lib/client-id";
 
 export type CreateLinkState = {
   ok: boolean;
@@ -45,66 +47,30 @@ export async function createLink(
     return { ok: false, error: "צריך להתחבר כדי לקצר לינק" };
   }
 
-  const rawUrl = String(formData.get("url") ?? "");
-  const title = String(formData.get("title") ?? "").trim() || null;
-  const customSlugRaw = String(formData.get("slug") ?? "").trim();
+  const client = normalizeClientId(formData.get("clientId"));
+  if ("error" in client) return { ok: false, error: client.error };
 
-  let destination: string;
-  try {
-    destination = buildDestinationUrl(
-      rawUrl,
-      {
-        source: String(formData.get("utm_source") ?? ""),
-        medium: String(formData.get("utm_medium") ?? ""),
-        campaign: String(formData.get("utm_campaign") ?? ""),
-        term: String(formData.get("utm_term") ?? ""),
-        content: String(formData.get("utm_content") ?? ""),
-      },
-      readCustomParams(formData),
-    );
-  } catch (e) {
-    return { ok: false, error: (e as Error).message };
-  }
+  const result = await createLinkRecord({
+    ownerId: session.user.id,
+    url: String(formData.get("url") ?? ""),
+    title: String(formData.get("title") ?? ""),
+    slug: String(formData.get("slug") ?? ""),
+    clientId: client.value,
+    expiresAt: parseExpiry(formData),
+    utm: {
+      source: String(formData.get("utm_source") ?? ""),
+      medium: String(formData.get("utm_medium") ?? ""),
+      campaign: String(formData.get("utm_campaign") ?? ""),
+      term: String(formData.get("utm_term") ?? ""),
+      content: String(formData.get("utm_content") ?? ""),
+    },
+    custom: readCustomParams(formData),
+  });
 
-  let slug: string;
-  if (customSlugRaw) {
-    const err = validateCustomSlug(customSlugRaw);
-    if (err) return { ok: false, error: err };
-    const existing = await prisma.link.findUnique({
-      where: { slug: customSlugRaw },
-    });
-    if (existing) return { ok: false, error: "הכתובת המותאמת כבר תפוסה" };
-    slug = customSlugRaw;
-  } else {
-    // Generate a unique random slug.
-    slug = randomSlug();
-    for (let i = 0; i < 5; i++) {
-      const taken =
-        RESERVED_SLUGS.has(slug) ||
-        (await prisma.link.findUnique({ where: { slug } }));
-      if (!taken) break;
-      slug = randomSlug();
-    }
-  }
+  if (!result.ok) return { ok: false, error: result.error };
 
-  try {
-    await prisma.link.create({
-      data: {
-        slug,
-        url: destination,
-        title,
-        ownerId: session.user.id,
-        expiresAt: parseExpiry(formData),
-      },
-    });
-  } catch {
-    return { ok: false, error: "שמירת הלינק נכשלה, נסו שוב" };
-  }
-
-  // A request for this slug may have been negative-cached before it existed.
-  await invalidateLink(slug);
   revalidatePath("/");
-  return { ok: true, slug };
+  return { ok: true, slug: result.slug };
 }
 
 export async function deleteLink(formData: FormData): Promise<void> {
@@ -174,6 +140,9 @@ export async function updateLink(
   const rawUrl = String(formData.get("url") ?? "");
   const newSlug = String(formData.get("slug") ?? "").trim();
 
+  const client = normalizeClientId(formData.get("clientId"));
+  if ("error" in client) return { ok: false, error: client.error };
+
   // Validate + normalize the destination URL.
   let destination: string;
   try {
@@ -192,7 +161,13 @@ export async function updateLink(
 
   await prisma.link.update({
     where: { id },
-    data: { title, url: destination, slug: newSlug, expiresAt: parseExpiry(formData) },
+    data: {
+      title,
+      url: destination,
+      slug: newSlug,
+      clientId: client.value,
+      expiresAt: parseExpiry(formData),
+    },
   });
 
   // Both slugs: the old one must stop resolving, the new one may be stale.

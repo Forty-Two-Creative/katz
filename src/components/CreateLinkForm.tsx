@@ -73,6 +73,22 @@ export function CreateLinkForm({ baseUrl }: { baseUrl: string }) {
 
             <div>
               <label className="mb-1.5 block text-sm font-medium text-gray-700">
+                מזהה לקוח (מתיקי)
+              </label>
+              <input
+                name="clientId"
+                type="text"
+                dir="ltr"
+                placeholder="cmh2k9f4x0000qa7b3n1d8z6v"
+                className="w-full rounded-xl border-0 bg-white px-4 py-2.5 text-left font-mono text-sm text-gray-900 ring-1 ring-gray-200 focus:ring-2 focus:ring-brand-500"
+              />
+              <p className="mt-1 text-xs text-gray-400">
+                מזהה הלקוח מתיקי — לא שם הלקוח. מחבר את הלינק לשאר המערכות של 42.
+              </p>
+            </div>
+
+            <div>
+              <label className="mb-1.5 block text-sm font-medium text-gray-700">
                 כתובת מותאמת אישית
               </label>
               <div

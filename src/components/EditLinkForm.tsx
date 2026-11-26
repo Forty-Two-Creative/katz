@@ -24,6 +24,7 @@ export function EditLinkForm({
     slug: string;
     title: string | null;
     url: string;
+    clientId: string | null;
     expiresAt: string | null;
   };
   baseUrl: string;
@@ -57,6 +58,23 @@ export function EditLinkForm({
             placeholder="לדוגמה: קמפיין קיץ — אינסטגרם"
             className="w-full rounded-xl border-0 bg-gray-50 px-4 py-2.5 text-gray-900 ring-1 ring-gray-200 focus:bg-white focus:ring-2 focus:ring-brand-500"
           />
+        </div>
+
+        <div>
+          <label className="mb-1.5 block text-sm font-semibold text-gray-700">
+            מזהה לקוח (מתיקי)
+          </label>
+          <input
+            name="clientId"
+            type="text"
+            dir="ltr"
+            defaultValue={link.clientId ?? ""}
+            placeholder="cmh2k9f4x0000qa7b3n1d8z6v"
+            className="w-full rounded-xl border-0 bg-gray-50 px-4 py-2.5 text-left font-mono text-sm text-gray-900 ring-1 ring-gray-200 focus:bg-white focus:ring-2 focus:ring-brand-500"
+          />
+          <p className="mt-1 text-xs text-gray-400">
+            מזהה הלקוח מתיקי — לא שם הלקוח. ריק = לא משויך.
+          </p>
         </div>
 
         <div>

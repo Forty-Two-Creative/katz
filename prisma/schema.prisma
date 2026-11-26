@@ -81,12 +81,17 @@ model Link {
   createdAt DateTime  @default(now())
   expiresAt DateTime?
   disabled  Boolean   @default(false)
+  /// The client this link belongs to, as Tiki's `Client.id` — the cuid that is
+  /// the shared identifier across 42's systems. Opaque here: Katz has no client
+  /// table of its own and never resolves it to a name.
+  clientId  String?
 
   owner  User        @relation(fields: [ownerId], references: [id], onDelete: Cascade)
   clicks Click[]
   shares LinkShare[]
 
   @@index([ownerId])
+  @@index([clientId])
 }
 
 model Click {

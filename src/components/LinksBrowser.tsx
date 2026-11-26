@@ -19,7 +19,7 @@ export function LinksBrowser({
     const q = query.trim().toLowerCase();
     if (!q) return cards;
     return cards.filter((c) =>
-      [c.slug, c.title ?? "", c.url].some((field) =>
+      [c.slug, c.title ?? "", c.url, c.clientId ?? ""].some((field) =>
         field.toLowerCase().includes(q),
       ),
     );
@@ -45,7 +45,7 @@ export function LinksBrowser({
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="חיפוש לפי כתובת קצרה, שם או יעד…"
+            placeholder="חיפוש לפי כתובת קצרה, שם, יעד או מזהה לקוח…"
             className="w-full rounded-xl border-0 bg-white px-4 py-2.5 text-gray-900 ring-1 ring-gray-200 transition placeholder:text-gray-400 focus:ring-2 focus:ring-brand-500"
           />
         </div>

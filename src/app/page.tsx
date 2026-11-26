@@ -3,6 +3,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { getPendingCounts } from "@/lib/link-cache";
 import { accessFromRow, capabilitiesFor } from "@/lib/link-access";
+import { existingServiceUserId, SERVICE_USER_EMAIL } from "@/lib/service-user";
 import { flushClicks } from "@/lib/clicks-flush";
 import { getBaseUrl } from "@/lib/base-url";
 import { Header } from "@/components/Header";
@@ -27,12 +28,19 @@ export default async function HomePage({
 
   const baseUrl = await getBaseUrl();
 
+  // Links created through the API belong to the service account, so they are
+  // in nobody's personal list. Admins already have full reach over every link
+  // (see accessFor), so surface them here rather than nowhere.
+  const serviceId =
+    session.user.role === "ADMIN" ? await existingServiceUserId() : null;
+
   // Links the viewer owns, plus any a colleague has shared with them.
   const links = await prisma.link.findMany({
     where: {
       OR: [
         { ownerId: session.user.id },
         { shares: { some: { userId: session.user.id } } },
+        ...(serviceId ? [{ ownerId: serviceId }] : []),
       ],
     },
     orderBy: { createdAt: "desc" },
@@ -52,7 +60,11 @@ export default async function HomePage({
   // Everyone who could be shared with. Small, single-domain organisation, so a
   // picker beats typing an address and getting it wrong.
   const people = await prisma.user.findMany({
-    where: { id: { not: session.user.id } },
+    where: {
+      id: { not: session.user.id },
+      // The API service account is not a colleague you can share a link with.
+      email: { not: SERVICE_USER_EMAIL },
+    },
     select: { id: true, name: true, email: true },
     orderBy: { name: "asc" },
   });
@@ -74,6 +86,7 @@ export default async function HomePage({
       slug: l.slug,
       title: l.title,
       url: l.url,
+      clientId: l.clientId,
       createdAt: l.createdAt.toISOString(),
       expiresAt: l.expiresAt ? l.expiresAt.toISOString() : null,
       disabled: l.disabled,

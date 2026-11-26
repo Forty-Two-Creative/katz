@@ -17,6 +17,8 @@ export type LinkCardData = {
   slug: string;
   title: string | null;
   url: string;
+  /** Tiki's client id, when the link was tagged with one. */
+  clientId?: string | null;
   createdAt: string;
   expiresAt: string | null;
   disabled: boolean;
@@ -119,6 +121,15 @@ export function LinkCard({
           </span>
           {link.ownerName && (
             <span className="text-gray-400">· {link.ownerName}</span>
+          )}
+          {link.clientId && (
+            <span
+              dir="ltr"
+              title="מזהה לקוח (תיקי)"
+              className="rounded bg-gray-100 px-1.5 py-0.5 font-mono text-xs text-gray-500"
+            >
+              {link.clientId}
+            </span>
           )}
           {link.perms.access === "view" && (
             <span className="rounded bg-blue-50 px-1.5 py-0.5 text-xs font-medium text-blue-700">

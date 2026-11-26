@@ -6,6 +6,8 @@
 - ✂️ קיצור לינק ארוך לכתובת קצרה (`katz.wtf/abc1234`)
 - 🎯 בניית קידוד קמפיין (פרמטרי UTM) — לא חובה
 - 🔗 כתובת מותאמת אישית — לא חובה
+- 🏷️ שיוך לקוח (`clientId` מתיקי) — מחבר לינק לשאר המערכות של 42
+- 🔌 API ליצירת לינק ממערכת אחרת (`POST /api/links`)
 - 📊 מעקב בסיסי: כמות כניסות, מקור (referer), מדינה, סוג מכשיר
 - 🔐 כניסה עם Google (אפשר להגביל לדומיין הארגוני)
 - 📤 שיתוף לינקים בלחיצה
@@ -35,6 +37,8 @@ npm run dev               # http://localhost:3000
 | `AUTH_GOOGLE_SECRET` | Client Secret מ-Google Cloud |
 | `ALLOWED_EMAIL_DOMAIN` | הגבלת כניסה לדומיין (לדוגמה `42creative.co.il`). השאירו ריק כדי לאפשר לכל אחד |
 | `SUPER_ADMIN_EMAIL` | המייל שתמיד יהיה אדמין (ברירת מחדל: `or@42creative.co.il`) |
+| `KATZ_API_TOKEN` | סוד משותף ל-`POST /api/links`. בלעדיו ה-endpoint מחזיר 503 |
+| `KATZ_API_USER_EMAIL` | החשבון שמחזיק לינקים שנוצרו דרך ה-API (ברירת מחדל: `api@katz.service`) |
 
 ---
 
@@ -72,6 +76,93 @@ npm run dev               # http://localhost:3000
 > ⚠️ אחרי שמוסיפים דומיין, עדכנו את ה-redirect URI ב-Google:
 > `https://katz.wtf/api/auth/callback/google`
 > וכדאי גם להגדיר ב-Vercel את משתנה הסביבה `NEXT_PUBLIC_SITE_URL=https://katz.wtf`.
+
+---
+
+## API — יצירת לינק ממערכת אחרת
+
+מערכת אחרת של 42 (תיקי, הפורטל) יכולה לקצר לינק בלי משתמש ובלי דפדפן.
+
+### אימות
+
+כותרת בלבד:
+
+```
+Authorization: Bearer $KATZ_API_TOKEN
+```
+
+אין נפילה חזרה לסשן ואין טוקן ב-query string — מי שאין לו כותרת תקינה מקבל `401`.
+אם `KATZ_API_TOKEN` לא מוגדר בכלל, ה-endpoint מחזיר `503` ולא יוצר שום דבר.
+
+### בקשה
+
+`POST /api/links`, גוף JSON:
+
+| שדה | חובה | תיאור |
+|---|---|---|
+| `url` | ✅ | כתובת היעד. בלי `http://` או `https://` — נוסיף `https://` |
+| `title` | — | שם פנימי ללינק |
+| `slug` | — | כתובת מותאמת. ריק = נייצר אחת אקראית |
+| `clientId` | — | `Client.id` מתיקי. מזהה בלבד, לא שם לקוח |
+| `expiresAt` | — | תאריך תפוגה, ISO 8601 |
+| `utm` | — | `{ source, medium, campaign, term, content }` (גם בשמות המלאים `utm_source` וכו׳) |
+
+```bash
+curl -X POST https://katz.wtf/api/links \
+  -H "Authorization: Bearer $KATZ_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "url": "https://example.com/landing",
+        "title": "קמפיין קיץ",
+        "clientId": "cmh2k9f4x0000qa7b3n1d8z6v",
+        "utm": { "source": "instagram", "medium": "social" }
+      }'
+```
+
+### תשובה
+
+`201` עם:
+
+```json
+{
+  "id": "cmh3...",
+  "slug": "k7m2q9x",
+  "shortUrl": "https://katz.wtf/k7m2q9x"
+}
+```
+
+שגיאות: `400` (גוף לא תקין / `url` חסר או פסול / `clientId` פסול / `expiresAt` פסול),
+`401` (טוקן שגוי או חסר), `409` (ה-`slug` המבוקש תפוס), `503` (אין טוקן מוגדר בשרת).
+
+### בעלות על הלינק
+
+לינקים שנוצרים דרך ה-API שייכים לחשבון שירות (`KATZ_API_USER_EMAIL`) ולא לאדם —
+מחיקת משתמש מוחקת בשרשור את כל הלינקים שלו, ולינק שתיקי יצרה לא צריך להישבר
+כשמי שחיבר את האינטגרציה עוזב. החשבון הזה לא כתובת מייל אמיתית, ולכן אי אפשר
+להתחבר כמוהו.
+
+כדי שהלינקים האלה לא יהיו בלתי-נראים לחלוטין, **אדמין רואה אותם בדשבורד ובייצוא
+ה-CSV** בנוסף ללינקים שלו ולאלה ששותפו איתו. לא שונה שום דבר אחר בהרשאות.
+
+---
+
+## שדרוג מסד הנתונים
+
+השינוי היחיד בסכמה הוא הוספת העמודה `clientId` לטבלת `Link` (ואינדקס עליה) —
+תוספתי בלבד, בלי `DROP` ובלי שינוי טיפוס של עמודה קיימת:
+
+```bash
+npm run db:push
+```
+
+לבדיקה מראש מה בדיוק ירוץ, בלי לגעת במסד:
+
+```bash
+npx prisma migrate diff \
+  --from-schema-datasource prisma/schema.prisma \
+  --to-schema-datamodel prisma/schema.prisma \
+  --script
+```
 
 ---
 
